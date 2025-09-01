@@ -1,14 +1,14 @@
--- 设置搜索路径
+
 SET SEARCH_PATH TO work;
 
--- 步骤1：创建新纳排表（仅包含使用苯妥英钠的患者）
+
 DROP TABLE IF EXISTS keyan_eswofg_mimic_subject;
 CREATE TABLE keyan_eswofg_mimic_subject AS 
 
 WITH 
--- 获取ICU期间使用苯妥英钠的STAY_ID（口服+静脉）
+
 phenytoin_stays AS (
-  -- 口服给药
+ 
   SELECT DISTINCT ICU.STAY_ID
   FROM MIMICIV_HOSP.PRESCRIPTIONS PRES
   JOIN MIMICIV_DERIVED.ICUSTAY_DETAIL ICU 
@@ -18,7 +18,7 @@ phenytoin_stays AS (
   
   UNION
   
-  -- 静脉输液
+ 
   SELECT DISTINCT INPUT.STAY_ID
   FROM MIMICIV_ICU.INPUTEVENTS INPUT
   JOIN MIMICIV_DERIVED.ICUSTAY_DETAIL ICU 
@@ -27,7 +27,7 @@ phenytoin_stays AS (
   WHERE INPUT.ITEMID = 227690
 ),
 
--- 关联患者信息并应用纳排条件
+
 qualified_subjects AS (
   SELECT DISTINCT ICU.SUBJECT_ID, ICU.STAY_ID, ICU.HADM_ID
   FROM MIMICIV_DERIVED.ICUSTAY_DETAIL ICU
@@ -40,14 +40,14 @@ qualified_subjects AS (
 
 SELECT * FROM qualified_subjects;
 
--- 添加注释和索引
+
 COMMENT ON TABLE keyan_eswofg_mimic_subject IS '2025-07-28 | 仅含苯妥英钠使用者';
 CREATE INDEX idx_subject_hadm ON keyan_eswofg_mimic_subject (hadm_id);
 CREATE INDEX idx_subject_stay ON keyan_eswofg_mimic_subject (stay_id);
 
--- 步骤2：合并口服和静脉用药数据
+
 WITH 
--- 口服给药数据
+
 phenytoin_oral AS (
   SELECT 
     PRES.HADM_ID,
@@ -66,7 +66,7 @@ phenytoin_oral AS (
   GROUP BY PRES.HADM_ID
 ),
 
--- 静脉输液数据（获取首次给药）
+
 phenytoin_iv AS (
   SELECT DISTINCT ON (INPUT.STAY_ID)
     INPUT.STAY_ID,
@@ -84,24 +84,24 @@ phenytoin_iv AS (
   ORDER BY INPUT.STAY_ID, INPUT.STARTTIME
 )
 
--- 合并结果
+
 SELECT 
   sub.SUBJECT_ID,
   sub.STAY_ID,
   sub.HADM_ID,
   
-  -- 口服数据
+
   COALESCE(po.oral_flag, 0) AS phenytoin_oral_flag,
   COALESCE(po.oral_dose, 0) AS phenytoin_oral_dose,
   po.oral_unit AS phenytoin_oral_unit,
   
-  -- 静脉数据
+
   COALESCE(iv.iv_flag, 0) AS phenytoin_iv_flag,
   COALESCE(iv.iv_dose, 0) AS phenytoin_iv_dose,
   iv.iv_unit AS phenytoin_iv_unit,
   iv.iv_starttime AS phenytoin_iv_starttime,
   
-  -- 总体用药标志
+
   CASE 
     WHEN po.oral_flag IS NOT NULL OR iv.iv_flag IS NOT NULL THEN 1 
     ELSE 0 
@@ -110,4 +110,5 @@ SELECT
 FROM work.keyan_eswofg_mimic_subject sub
 LEFT JOIN phenytoin_oral po ON sub.HADM_ID = po.HADM_ID
 LEFT JOIN phenytoin_iv iv ON sub.STAY_ID = iv.STAY_ID
+
 ORDER BY sub.SUBJECT_ID;
