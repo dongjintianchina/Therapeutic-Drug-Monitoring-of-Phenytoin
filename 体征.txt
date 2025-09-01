@@ -1,0 +1,10 @@
+SELECT subject.subject_id,subject.stay_id,subject.hadm_id ,
+	vital_HR as vitalHR,vital_HR_uom as vitalHR_uom,
+	vital_NBPm as vitalNBPm,vital_NBPm_uom as vitalNBPm_uom,
+	vital_ABPm as vitalABPm,vital_ABPm_uom as vitalABPm_uom,
+	vital_RR as vitalRR,vital_RR_uom as vitalRR_uom,
+	vital_SpO2 as vitalSpO2,vital_SpO2_uom as vitalSpO2_uom,
+	vital_Temperature as vitalTemperature,vital_Temperature_uom as vitalTemperature_uom 
+FROM work.keyan_eswofg_mimic_subject AS SUBJECT
+LEFT JOIN public.first_vitalsign ON SUBJECT.stay_id = first_vitalsign.stay_id
+ORDER BY SUBJECT.subject_id

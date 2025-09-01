@@ -1,0 +1,12 @@
+SELECT subject.subject_id,subject.stay_id,subject.hadm_id ,
+	labWBC as labWBC,labWBC_uom as labWBC_uom,
+	labPlateletCount as labPlateletCount,labPlateletCount_uom as labPlateletCount_uom,
+	labHemoglobin as labHemoglobin,labHemoglobin_uom as labHemoglobin_uom,
+	labHematocrit as labHematocrit,labHematocrit_uom as labHematocrit_uom,
+	labAlbumin as labAlbumin,labAlbumin_uom as labAlbumin_uom,
+	labGlucose as labGlucose,labGlucose_uom as labGlucose_uom,
+	labUreaNitrogen as labUreaNitrogen,labUreaNitrogen_uom as labUreaNitrogen_uom,
+	labCreatinine as labCreatinine,labCreatinine_uom as labCreatinine_uom 
+FROM work.keyan_eswofg_mimic_subject AS SUBJECT
+LEFT JOIN public.first_lab ON SUBJECT.stay_id = first_lab.stay_id
+ORDER BY SUBJECT.subject_id

@@ -1,0 +1,113 @@
+-- 设置搜索路径
+SET SEARCH_PATH TO work;
+
+-- 步骤1：创建新纳排表（仅包含使用苯妥英钠的患者）
+DROP TABLE IF EXISTS keyan_eswofg_mimic_subject;
+CREATE TABLE keyan_eswofg_mimic_subject AS 
+
+WITH 
+-- 获取ICU期间使用苯妥英钠的STAY_ID（口服+静脉）
+phenytoin_stays AS (
+  -- 口服给药
+  SELECT DISTINCT ICU.STAY_ID
+  FROM MIMICIV_HOSP.PRESCRIPTIONS PRES
+  JOIN MIMICIV_DERIVED.ICUSTAY_DETAIL ICU 
+    ON PRES.HADM_ID = ICU.HADM_ID
+    AND PRES.STARTTIME BETWEEN ICU.ICU_INTIME AND ICU.ICU_OUTTIME
+  WHERE PRES.GSN IN ('004528','004521','004531','063663','004529','027653','063845','004522','063664','004526')
+  
+  UNION
+  
+  -- 静脉输液
+  SELECT DISTINCT INPUT.STAY_ID
+  FROM MIMICIV_ICU.INPUTEVENTS INPUT
+  JOIN MIMICIV_DERIVED.ICUSTAY_DETAIL ICU 
+    ON INPUT.STAY_ID = ICU.STAY_ID
+    AND INPUT.STARTTIME BETWEEN ICU.ICU_INTIME AND ICU.ICU_OUTTIME
+  WHERE INPUT.ITEMID = 227690
+),
+
+-- 关联患者信息并应用纳排条件
+qualified_subjects AS (
+  SELECT DISTINCT ICU.SUBJECT_ID, ICU.STAY_ID, ICU.HADM_ID
+  FROM MIMICIV_DERIVED.ICUSTAY_DETAIL ICU
+  JOIN MIMICIV_DERIVED.AGE AGE ON ICU.HADM_ID = AGE.HADM_ID
+  JOIN phenytoin_stays ON ICU.STAY_ID = phenytoin_stays.STAY_ID
+  WHERE 
+    ICU.FIRST_ICU_STAY = TRUE
+    AND AGE.AGE BETWEEN 0.0 AND 100.0
+)
+
+SELECT * FROM qualified_subjects;
+
+-- 添加注释和索引
+COMMENT ON TABLE keyan_eswofg_mimic_subject IS '2025-07-28 | 仅含苯妥英钠使用者';
+CREATE INDEX idx_subject_hadm ON keyan_eswofg_mimic_subject (hadm_id);
+CREATE INDEX idx_subject_stay ON keyan_eswofg_mimic_subject (stay_id);
+
+-- 步骤2：合并口服和静脉用药数据
+WITH 
+-- 口服给药数据
+phenytoin_oral AS (
+  SELECT 
+    PRES.HADM_ID,
+    1 AS oral_flag,
+    SUM(CAST(PRES.dose_val_rx AS NUMERIC)) AS oral_dose,
+    MAX(PRES.dose_unit_rx) AS oral_unit
+  FROM MIMICIV_HOSP.PRESCRIPTIONS PRES
+  JOIN work.keyan_eswofg_mimic_subject sub 
+    ON PRES.HADM_ID = sub.HADM_ID
+  JOIN MIMICIV_DERIVED.ICUSTAY_DETAIL ICU 
+    ON sub.STAY_ID = ICU.STAY_ID
+    AND PRES.STARTTIME BETWEEN ICU.ICU_INTIME AND ICU.ICU_OUTTIME
+  WHERE 
+    PRES.GSN IN ('004528','004521','004531','063663','004529','027653','063845','004522','063664','004526')
+    AND PRES.dose_val_rx ~ '^[0-9]+(\.[0-9]+)?$'
+  GROUP BY PRES.HADM_ID
+),
+
+-- 静脉输液数据（获取首次给药）
+phenytoin_iv AS (
+  SELECT DISTINCT ON (INPUT.STAY_ID)
+    INPUT.STAY_ID,
+    1 AS iv_flag,
+    ROUND(INPUT.AMOUNT::numeric, 2) AS iv_dose,
+    INPUT.AMOUNTUOM AS iv_unit,
+    INPUT.STARTTIME AS iv_starttime
+  FROM MIMICIV_ICU.INPUTEVENTS INPUT
+  JOIN work.keyan_eswofg_mimic_subject sub 
+    ON INPUT.STAY_ID = sub.STAY_ID
+  JOIN MIMICIV_DERIVED.ICUSTAY_DETAIL ICU 
+    ON sub.STAY_ID = ICU.STAY_ID
+    AND INPUT.STARTTIME BETWEEN ICU.ICU_INTIME AND ICU.ICU_OUTTIME
+  WHERE INPUT.ITEMID = 227690
+  ORDER BY INPUT.STAY_ID, INPUT.STARTTIME
+)
+
+-- 合并结果
+SELECT 
+  sub.SUBJECT_ID,
+  sub.STAY_ID,
+  sub.HADM_ID,
+  
+  -- 口服数据
+  COALESCE(po.oral_flag, 0) AS phenytoin_oral_flag,
+  COALESCE(po.oral_dose, 0) AS phenytoin_oral_dose,
+  po.oral_unit AS phenytoin_oral_unit,
+  
+  -- 静脉数据
+  COALESCE(iv.iv_flag, 0) AS phenytoin_iv_flag,
+  COALESCE(iv.iv_dose, 0) AS phenytoin_iv_dose,
+  iv.iv_unit AS phenytoin_iv_unit,
+  iv.iv_starttime AS phenytoin_iv_starttime,
+  
+  -- 总体用药标志
+  CASE 
+    WHEN po.oral_flag IS NOT NULL OR iv.iv_flag IS NOT NULL THEN 1 
+    ELSE 0 
+  END AS phenytoin_any_flag
+  
+FROM work.keyan_eswofg_mimic_subject sub
+LEFT JOIN phenytoin_oral po ON sub.HADM_ID = po.HADM_ID
+LEFT JOIN phenytoin_iv iv ON sub.STAY_ID = iv.STAY_ID
+ORDER BY sub.SUBJECT_ID;
